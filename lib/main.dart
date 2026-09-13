@@ -80,7 +80,6 @@ class DigimonGame extends FlameGame with HasCollisionDetection, HasKeyboardHandl
     player.position = Vector2(50, 100);
     player.velocity = Vector2.zero();
 
-    // Map Construction berdasarkan Stage HTML
     if (stage == 1) {
       _buildPlatform(0, 220, 900, 50);
       _buildPlatform(980, 130, 180, 20);
@@ -322,7 +321,7 @@ class BossMetalGreymon extends PositionComponent with CollisionCallbacks, HasGam
     hp -= dmg;
     if (hp <= 0) {
       removeFromParent();
-      gameRef.buildStage(1); // Victory, reset stage
+      gameRef.buildStage(1);
     }
   }
 
@@ -482,7 +481,6 @@ class _GameScreenState extends State<GameScreen> {
     return Scaffold(
       body: Column(
         children: [
-          // Upper Canvas Viewport (55%)
           Expanded(
             flex: 55,
             child: Stack(
@@ -507,8 +505,6 @@ class _GameScreenState extends State<GameScreen> {
               ],
             ),
           ),
-
-          // Lower Control Dashboard (45%)
           Expanded(
             flex: 45,
             child: Container(
@@ -517,7 +513,6 @@ class _GameScreenState extends State<GameScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  // Inventory
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(4)),
@@ -532,12 +527,9 @@ class _GameScreenState extends State<GameScreen> {
                       ],
                     ),
                   ),
-
-                  // Touch Controls
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // D-Pad
                       SizedBox(
                         width: 100, height: 100,
                         child: Stack(
@@ -557,8 +549,6 @@ class _GameScreenState extends State<GameScreen> {
                           ],
                         ),
                       ),
-
-                      // Action Buttons
                       Row(
                         children: [
                           _actionBtn("B", "FIRE", Colors.redAccent, game.shootPlayer),
@@ -603,7 +593,7 @@ class _GameScreenState extends State<GameScreen> {
 
   Widget _actionBtn(String label, String sub, Color color, VoidCallback onTap) {
     return Column(
-      mainAxisSize: min,
+      mainAxisSize: MainAxisSize.min, // FIX: MainAxisSize.min sudah benar
       children: [
         GestureDetector(
           onTap: onTap,
