@@ -19,7 +19,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Super Mario Strategy - Digimon Edition',
+      title: 'Super Mario Strategy - Digimon Ultimate',
       theme: ThemeData.dark(),
       home: const GameScreen(),
     );
@@ -27,18 +27,33 @@ class MyApp extends StatelessWidget {
 }
 
 // ==========================================
-// GAME MODELS
+// GAME MODELS & ENGINE PARTICLES
 // ==========================================
 class Player {
   double x = 50;
   double y = 100;
-  double w = 28;
-  double h = 32;
+  double baseW = 28;
+  double baseH = 32;
   double dx = 0;
   double dy = 0;
   bool grounded = false;
   bool facingRight = true;
   int jumps = 0;
+
+  // Evolution State
+  bool isEvolved = false; // Agumon -> Greymon
+  double evolveTimer = 0;
+
+  double get w => isEvolved ? baseW * 1.5 : baseW;
+  double get h => isEvolved ? baseH * 1.5 : baseH;
+}
+
+class Particle {
+  double x, y, dx, dy;
+  Color color;
+  double size;
+  double life;
+  Particle(this.x, this.y, this.dx, this.dy, this.color, this.size, {this.life = 1.0});
 }
 
 class Block {
@@ -55,10 +70,12 @@ class Pipe {
 
 class Enemy {
   int id;
-  double x, y, w, h, dx, minX, maxX;
+  double x, y, baseY, w, h, dx, minX, maxX;
   String type; // 'walker', 'shield', 'bat'
+  double animTimer = 0;
   bool alive;
-  Enemy(this.id, this.x, this.y, this.w, this.h, this.dx, this.minX, this.maxX, {this.type = 'walker', this.alive = true});
+  Enemy(this.id, this.x, this.y, this.w, this.h, this.dx, this.minX, this.maxX, {this.type = 'walker', this.alive = true})
+      : baseY = y;
 }
 
 class Boss {
@@ -68,6 +85,7 @@ class Boss {
   double shieldTimer;
   double hoverTime;
   double shootTimer;
+  bool isEnraged = false;
   bool alive;
   Boss({
     required this.x,
@@ -78,8 +96,8 @@ class Boss {
     required this.dx,
     required this.minX,
     required this.maxX,
-    this.hp = 12,
-    this.maxHp = 12,
+    this.hp = 14,
+    this.maxHp = 14,
     this.hasShield = true,
     this.shieldTimer = 0,
     this.hoverTime = 0,
@@ -91,7 +109,7 @@ class Boss {
 class QuestionBlock {
   int id;
   double x, y, w, h;
-  String type; // 'ammo', 'heart'
+  String type;
   bool used;
   QuestionBlock(this.id, this.x, this.y, this.w, this.h, this.type, {this.used = false});
 }
@@ -100,7 +118,8 @@ class Fireball {
   double x, y, dx, dy;
   int bounces;
   bool isBoss;
-  Fireball(this.x, this.y, this.dx, {this.dy = 100, this.bounces = 0, this.isBoss = false});
+  bool isMegaFlame;
+  Fireball(this.x, this.y, this.dx, this.dy, {this.bounces = 0, this.isBoss = false, this.isMegaFlame = false});
 }
 
 class Item {
@@ -132,19 +151,19 @@ class _GameScreenState extends State<GameScreen> {
   Timer? gameLoopTimer;
   Player player = Player();
 
-  String gameMode = "playing"; // "playing", "banner", "gameover", "win"
+  String gameMode = "playing"; // "playing", "paused", "banner", "gameover", "win"
   int stage = 1;
   int lives = 3;
   int ammo = 30;
   int maxAmmo = 99;
-  int stageCoins = 0;
+  int score = 0;
+  int highScore = 0;
   double cameraX = 0;
   double shakeTime = 0;
 
   bool inSecretRoom = false;
   bool inBossLair = false;
 
-  // Inventory
   int daging = 0;
   int ramuan = 0;
   int sisik = 0;
@@ -161,25 +180,26 @@ class _GameScreenState extends State<GameScreen> {
   List<QuestionBlock> questionBlocks = [];
   List<Fireball> fireballs = [];
   List<Fireball> bossFireballs = [];
+  List<Particle> particles = [];
   List<Item> items = [];
   List<FloatingText> floatingTexts = [];
   Block? flagPole;
   Boss? boss;
 
-  // Banner State
   String bannerTitle = "";
   String bannerDesc = "";
 
   // Controls
   bool keyLeft = false;
   bool keyRight = false;
+  bool keyUp = false;
   bool keyDown = false;
 
   @override
   void initState() {
     super.initState();
     loadStage(1);
-    showBanner("STAGE 1-1", "GREEN VALLEY\nPetualangan dimulai! Kumpulkan koin dan item.");
+    showBanner("STAGE 1-1", "GREEN VALLEY\nPetualangan dimulai! Ambil Kristal Crest untuk Evolusi Greymon!");
     startGameLoop();
   }
 
@@ -203,6 +223,16 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  void togglePause() {
+    setState(() {
+      if (gameMode == "playing") {
+        gameMode = "paused";
+      } else if (gameMode == "paused") {
+        gameMode = "playing";
+      }
+    });
+  }
+
   void loadStage(int stgNo) {
     stage = stgNo;
     player.x = 50;
@@ -213,6 +243,7 @@ class _GameScreenState extends State<GameScreen> {
     inBossLair = false;
     fireballs.clear();
     bossFireballs.clear();
+    particles.clear();
     boss = null;
 
     if (stage == 1) {
@@ -325,7 +356,7 @@ class _GameScreenState extends State<GameScreen> {
       flagPole = null;
       player.x = 40;
       player.y = 150;
-      showBanner("DRAGON'S NEST", "Arena Terkunci! Naga Penjaga MetalGreymon menghadang!");
+      showBanner("DRAGON'S NEST", "Arena Terkunci! MetalGreymon Siap Bertarung!");
     });
   }
 
@@ -337,13 +368,45 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  void spawnExplosion(double x, double y, Color color, {int count = 8}) {
+    for (int i = 0; i < count; i++) {
+      double angle = Random().nextDouble() * 2 * pi;
+      double speed = 40 + Random().nextDouble() * 80;
+      particles.add(Particle(
+        x, y,
+        cos(angle) * speed,
+        sin(angle) * speed,
+        color,
+        2 + Random().nextDouble() * 3,
+      ));
+    }
+  }
+
   void triggerShake(double duration) {
     shakeTime = duration;
+  }
+
+  void evolveToGreymon() {
+    setState(() {
+      player.isEvolved = true;
+      player.evolveTimer = 15.0; // Evolusi 15 detik
+      floatingTexts.add(FloatingText("EVOLUSI GREYMON!!", player.x, player.y - 20));
+      spawnExplosion(player.x, player.y, Colors.orange, count: 20);
+    });
   }
 
   void updatePhysics(double dt) {
     setState(() {
       if (shakeTime > 0) shakeTime -= dt;
+
+      // Timer Evolusi Player
+      if (player.isEvolved) {
+        player.evolveTimer -= dt;
+        if (player.evolveTimer <= 0) {
+          player.isEvolved = false;
+          floatingTexts.add(FloatingText("KEMBALI KE AGUMON", player.x, player.y - 10));
+        }
+      }
 
       // Horizontal Movement
       if (keyLeft) {
@@ -357,13 +420,11 @@ class _GameScreenState extends State<GameScreen> {
       }
 
       player.x += player.dx * dt;
-
-      // Gravity & Jump Physics
       player.dy += 950 * dt;
       if (player.dy > 600) player.dy = 600;
       player.y += player.dy * dt;
 
-      // Platform Collision
+      // Platform Collisions
       player.grounded = false;
       for (var p in platforms) {
         if (player.x < p.x + p.w &&
@@ -379,7 +440,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Camera Follow
       cameraX = inBossLair ? 0 : max(0, player.x - 120);
 
       // Secret & Boss Pipes Interactions
@@ -410,7 +470,7 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Question Blocks Interaction
+      // Question Blocks
       for (var qb in questionBlocks) {
         if (!qb.used &&
             player.x < qb.x + qb.w &&
@@ -419,6 +479,7 @@ class _GameScreenState extends State<GameScreen> {
             player.y + player.h > qb.y) {
           if (player.dy < 0) {
             qb.used = true;
+            spawnExplosion(qb.x + 14, qb.y + 14, Colors.yellow, count: 6);
             if (qb.type == 'ammo') ammo = min(maxAmmo, ammo + 10);
             if (qb.type == 'heart') lives = min(5, lives + 1);
           }
@@ -433,19 +494,26 @@ class _GameScreenState extends State<GameScreen> {
             player.y < item.y + 20 &&
             player.y + player.h > item.y) {
           item.collected = true;
+          spawnExplosion(item.x, item.y, Colors.amber);
           if (item.type == 'daging') daging++;
           if (item.type == 'ramuan') ramuan++;
           if (item.type == 'sisik') sisik++;
           if (item.type == 'cakar') cakar++;
           if (item.type == 'kunci') kunci = true;
+          if (item.type == 'kristal') evolveToGreymon();
         }
       }
 
-      // Enemy Physics & AI
+      // Enemy Physics & Variasi Bat Sinusoidal
       for (var e in enemies) {
         if (!e.alive) continue;
         e.x += e.dx * dt;
         if (e.x < e.minX || e.x > e.maxX) e.dx *= -1;
+
+        if (e.type == 'bat') {
+          e.animTimer += dt * 4;
+          e.y = e.baseY + sin(e.animTimer) * 20; // Gerakan Terbang Gelombang
+        }
 
         if (player.x < e.x + e.w &&
             player.x + player.w > e.x &&
@@ -455,11 +523,10 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Fireballs Movement
+      // Player Fireballs Movement & Dynamic Hitbox
       for (int i = fireballs.length - 1; i >= 0; i--) {
         var fb = fireballs[i];
         fb.x += fb.dx * dt;
-        fb.dy += 950 * dt * 0.4;
         fb.y += fb.dy * dt;
 
         if (fb.y > 210) {
@@ -474,22 +541,28 @@ class _GameScreenState extends State<GameScreen> {
         }
 
         // Hit Enemies
+        double fbSize = fb.isMegaFlame ? 16 : 8;
         for (var e in enemies) {
           if (e.alive &&
               fb.x < e.x + e.w &&
-              fb.x + 10 > e.x &&
+              fb.x + fbSize > e.x &&
               fb.y < e.y + e.h &&
-              fb.y + 10 > e.y) {
+              fb.y + fbSize > e.y) {
             e.alive = false;
+            score += 100;
+            if (score > highScore) highScore = score;
+            spawnExplosion(e.x + 10, e.y + 10, Colors.deepOrange, count: 12);
             fireballs.removeAt(i);
             break;
           }
         }
       }
 
-      // Boss Logic & AI
+      // Dynamic Boss AI & Enrage Mode
       if (boss != null && boss!.alive) {
-        double speedMult = (boss!.hp < boss!.maxHp / 2) ? 1.5 : 1.0;
+        boss!.isEnraged = boss!.hp <= (boss!.maxHp / 2);
+        double speedMult = boss!.isEnraged ? 1.8 : 1.0;
+
         boss!.hoverTime += dt;
         boss!.x += boss!.dx * speedMult * dt;
         if (boss!.x < boss!.minX || boss!.x > boss!.maxX) boss!.dx *= -1;
@@ -500,19 +573,23 @@ class _GameScreenState extends State<GameScreen> {
           if (boss!.shieldTimer <= 0) boss!.hasShield = true;
         }
 
-        // Boss Shoot
+        // Tembakan Bos (Enraged = Tembakan Ganda)
         boss!.shootTimer += dt;
-        if (boss!.shootTimer > (2.1 / speedMult)) {
+        double cooldown = boss!.isEnraged ? 1.2 : 2.1;
+        if (boss!.shootTimer > cooldown) {
           double pCX = player.x + player.w / 2;
           double pCY = player.y + player.h / 2;
           double bCX = boss!.x + boss!.w / 2;
           double bCY = boss!.y + boss!.h;
           double angle = atan2(pCY - bCY, pCX - bCX);
-          bossFireballs.add(Fireball(bCX - 5, bCY, cos(angle) * 180, dy: sin(angle) * 180, isBoss: true));
+          bossFireballs.add(Fireball(bCX - 5, bCY, cos(angle) * 200, sin(angle) * 200, isBoss: true));
+
+          if (boss!.isEnraged) {
+            bossFireballs.add(Fireball(bCX - 5, bCY, cos(angle + 0.3) * 200, sin(angle + 0.3) * 200, isBoss: true));
+          }
           boss!.shootTimer = 0;
         }
 
-        // Boss Touch Hit Player
         if (player.x < boss!.x + boss!.w &&
             player.x + player.w > boss!.x &&
             player.y < boss!.y + boss!.h &&
@@ -523,23 +600,28 @@ class _GameScreenState extends State<GameScreen> {
         // Player Fireball Hits Boss
         for (int i = fireballs.length - 1; i >= 0; i--) {
           var fb = fireballs[i];
+          double fbSize = fb.isMegaFlame ? 16 : 8;
           if (fb.x < boss!.x + boss!.w &&
-              fb.x + 10 > boss!.x &&
+              fb.x + fbSize > boss!.x &&
               fb.y < boss!.y + boss!.h &&
-              fb.y + 10 > boss!.y) {
+              fb.y + fbSize > boss!.y) {
             fireballs.removeAt(i);
             if (boss!.hasShield) {
               boss!.hasShield = false;
               boss!.shieldTimer = 3.0;
+              spawnExplosion(boss!.x + 30, boss!.y + 20, Colors.cyan, count: 10);
               triggerShake(0.1);
             } else {
-              int dmg = isDoubleDamage ? 2 : 1;
+              int dmg = (isDoubleDamage || player.isEvolved) ? 2 : 1;
               boss!.hp -= dmg;
               boss!.hasShield = true;
               boss!.shieldTimer = 0;
+              spawnExplosion(boss!.x + 30, boss!.y + 20, Colors.red, count: 15);
               triggerShake(0.3);
               if (boss!.hp <= 0) {
                 boss!.alive = false;
+                score += 1000;
+                if (score > highScore) highScore = score;
                 flagPole = Block(400, 60, 10, 160);
               }
             }
@@ -564,7 +646,16 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Floating Texts animation
+      // Particles Physics
+      for (int i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.dx * dt;
+        p.y += p.dy * dt;
+        p.life -= 2.0 * dt;
+        if (p.life <= 0) particles.removeAt(i);
+      }
+
+      // Floating Texts
       for (int i = floatingTexts.length - 1; i >= 0; i--) {
         var ft = floatingTexts[i];
         ft.y -= 20 * dt;
@@ -572,7 +663,6 @@ class _GameScreenState extends State<GameScreen> {
         if (ft.alpha <= 0) floatingTexts.removeAt(i);
       }
 
-      // Stage Flag Completion
       if (flagPole != null && player.x > flagPole!.x) {
         if (stage == 1) {
           loadStage(2);
@@ -585,7 +675,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Death by Falling
       if (player.y > 350) handleDeath();
     });
   }
@@ -594,6 +683,7 @@ class _GameScreenState extends State<GameScreen> {
     if (isInvincible) return;
     lives--;
     triggerShake(0.3);
+    spawnExplosion(player.x, player.y, Colors.orange, count: 15);
     if (lives > 0) {
       if (inBossLair) {
         enterBossLair();
@@ -608,6 +698,7 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void jump() {
+    HapticFeedback.lightImpact();
     if (gameMode == "banner") {
       closeBanner();
       return;
@@ -615,6 +706,7 @@ class _GameScreenState extends State<GameScreen> {
     if (gameMode == "gameover" || gameMode == "win") {
       lives = 3;
       ammo = 30;
+      score = 0;
       loadStage(1);
       showBanner("STAGE 1-1", "GREEN VALLEY\nPetualangan dimulai kembali!");
       return;
@@ -627,18 +719,28 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void shoot() {
+    HapticFeedback.lightImpact();
     if (gameMode != "playing") return;
     if (ammo > 0) {
       ammo--;
+      // Tembakan Fleksibel (Lurus / Diagonally / Ke Atas)
+      double fdx = player.facingRight ? 420 : -420;
+      double fdy = 0;
+      if (keyUp) {
+        fdy = -300;
+        fdx *= 0.7;
+      }
       fireballs.add(Fireball(
-        player.x + (player.facingRight ? 30 : -10),
+        player.x + (player.facingRight ? player.w : -10),
         player.y + 12,
-        player.facingRight ? 420 : -420,
+        fdx, fdy,
+        isMegaFlame: player.isEvolved,
       ));
     }
   }
 
   void useItem(String type) {
+    HapticFeedback.mediumImpact();
     if (type == 'daging' && daging > 0) {
       daging--;
       lives = min(5, lives + 1);
@@ -665,7 +767,6 @@ class _GameScreenState extends State<GameScreen> {
     return Scaffold(
       body: Column(
         children: [
-          // Upper Canvas Frame (55%)
           Expanded(
             flex: 55,
             child: Stack(
@@ -681,6 +782,7 @@ class _GameScreenState extends State<GameScreen> {
                     questionBlocks: questionBlocks,
                     fireballs: fireballs,
                     bossFireballs: bossFireballs,
+                    particles: particles,
                     items: items,
                     floatingTexts: floatingTexts,
                     flagPole: flagPole,
@@ -692,22 +794,53 @@ class _GameScreenState extends State<GameScreen> {
                     inBossLair: inBossLair,
                   ),
                 ),
+                // HUD Bar
                 Positioned(
-                  top: 10, left: 10, right: 10,
+                  top: 8, left: 10, right: 10,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text("STG: 1-$stage", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace')),
+                      Row(
+                        children: [
+                          Text("STG: 1-$stage", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 15),
+                          Text("SCORE: $score", style: const TextStyle(color: Colors.yellow, fontSize: 10, fontFamily: 'monospace')),
+                        ],
+                      ),
                       Row(
                         children: [
                           Text("❤️" * lives, style: const TextStyle(fontSize: 10)),
                           const SizedBox(width: 10),
                           Text("🔫 $ammo", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace')),
+                          const SizedBox(width: 10),
+                          IconButton(
+                            icon: Icon(gameMode == "paused" ? Icons.play_arrow : Icons.pause, color: Colors.white, size: 16),
+                            onPressed: togglePause,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
+                if (gameMode == "paused")
+                  Container(
+                    color: Colors.black75,
+                    alignment: Alignment.center,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text("GAME PAUSED", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 10),
+                        ElevatedButton(
+                          onPressed: togglePause,
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2ECC71)),
+                          child: const Text("LANJUTKAN", style: TextStyle(fontSize: 9, color: Colors.white)),
+                        )
+                      ],
+                    ),
+                  ),
                 if (gameMode == "banner")
                   Container(
                     color: Colors.black87,
@@ -736,6 +869,8 @@ class _GameScreenState extends State<GameScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(gameMode == "win" ? "LUAR BIASA! TAMAT!" : "GAME OVER", style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        Text("HIGH SCORE: $highScore", style: const TextStyle(color: Colors.yellow, fontSize: 9)),
                         const SizedBox(height: 10),
                         const Text("Tekan Tombol A untuk Mulai Lagi", style: TextStyle(color: Colors.white70, fontSize: 8)),
                       ],
@@ -745,18 +880,22 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
 
-          // Lower Control Dashboard (45%)
+          // Lower Control Dashboard (Retro Console Design)
           Expanded(
             flex: 45,
             child: Container(
-              color: const Color(0xFFD3D3D3),
+              decoration: const BoxDecoration(
+                color: Color(0xFFD3D3D3),
+                border: Border(top: BorderSide(color: Color(0xFFBBBBBB), width: 4)),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
+                  // Tas Inventory Bar
                   Container(
                     padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(4)),
+                    decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.grey.shade700)),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
@@ -768,23 +907,29 @@ class _GameScreenState extends State<GameScreen> {
                       ],
                     ),
                   ),
+
+                  // D-Pad Modern Retro Controller
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       SizedBox(
-                        width: 100, height: 100,
+                        width: 105, height: 105,
                         child: Stack(
                           children: [
                             Positioned(
-                              left: 0, top: 33,
+                              left: 35, top: 0,
+                              child: _dirBtn(Icons.arrow_drop_up, (down) => keyUp = down),
+                            ),
+                            Positioned(
+                              left: 0, top: 35,
                               child: _dirBtn(Icons.arrow_left, (down) => keyLeft = down),
                             ),
                             Positioned(
-                              right: 0, top: 33,
+                              right: 0, top: 35,
                               child: _dirBtn(Icons.arrow_right, (down) => keyRight = down),
                             ),
                             Positioned(
-                              left: 33, bottom: 0,
+                              left: 35, bottom: 0,
                               child: _dirBtn(Icons.arrow_drop_down, (down) => keyDown = down),
                             ),
                           ],
@@ -813,7 +958,7 @@ class _GameScreenState extends State<GameScreen> {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(color: const Color(0xFF444444), borderRadius: BorderRadius.circular(4)),
+        decoration: BoxDecoration(color: const Color(0xFF444444), borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.white24)),
         child: Text("$icon $val", style: const TextStyle(fontSize: 10, color: Colors.white)),
       ),
     );
@@ -821,13 +966,20 @@ class _GameScreenState extends State<GameScreen> {
 
   Widget _dirBtn(IconData icon, Function(bool) onPressed) {
     return GestureDetector(
-      onTapDown: (_) => onPressed(true),
+      onTapDown: (_) {
+        HapticFeedback.selectionClick();
+        onPressed(true);
+      },
       onTapUp: (_) => onPressed(false),
       onTapCancel: () => onPressed(false),
       child: Container(
-        width: 36, height: 36,
-        decoration: BoxDecoration(color: const Color(0xFF2C2C2C), borderRadius: BorderRadius.circular(4)),
-        child: Icon(icon, color: Colors.white),
+        width: 35, height: 35,
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2C),
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: const [BoxShadow(color: Colors.black45, offset: Offset(0, 3))],
+        ),
+        child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
   }
@@ -839,19 +991,24 @@ class _GameScreenState extends State<GameScreen> {
         GestureDetector(
           onTap: onTap,
           child: Container(
-            width: 44, height: 44,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+            width: 46, height: 46,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: const [BoxShadow(color: Colors.black45, offset: Offset(0, 3))],
+            ),
+            child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
           ),
         ),
-        Text(sub, style: const TextStyle(fontSize: 8, color: Colors.black54)),
+        const SizedBox(height: 2),
+        Text(sub, style: const TextStyle(fontSize: 7, color: Colors.black54, fontWeight: FontWeight.bold)),
       ],
     );
   }
 }
 
 // ==========================================
-// GAME PAINTER (CANVAS DRAWING)
+// GAME PAINTER (AUTOMATIC GRAPHICS & PARTICLES)
 // ==========================================
 class GamePainter extends CustomPainter {
   final Player player;
@@ -862,6 +1019,7 @@ class GamePainter extends CustomPainter {
   final List<QuestionBlock> questionBlocks;
   final List<Fireball> fireballs;
   final List<Fireball> bossFireballs;
+  final List<Particle> particles;
   final List<Item> items;
   final List<FloatingText> floatingTexts;
   final Block? flagPole;
@@ -881,6 +1039,7 @@ class GamePainter extends CustomPainter {
     required this.questionBlocks,
     required this.fireballs,
     required this.bossFireballs,
+    required this.particles,
     required this.items,
     required this.floatingTexts,
     required this.flagPole,
@@ -894,57 +1053,78 @@ class GamePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Sky Background Dynamic Color
-    Color skyColor = const Color(0xFF87CEEB);
-    if (inSecretRoom) skyColor = Colors.black;
-    if (inBossLair) skyColor = const Color(0xFF4A0000);
-    if (stage == 2 && !inSecretRoom) skyColor = const Color(0xFF0A2F1D);
-    if (stage == 3 && !inBossLair) skyColor = const Color(0xFF2B0000);
+    Color skyTop = const Color(0xFF2C3E50);
+    Color skyBottom = const Color(0xFF3498DB);
+    if (inSecretRoom) {
+      skyTop = Colors.black;
+      skyBottom = const Color(0xFF111111);
+    } else if (inBossLair) {
+      skyTop = const Color(0xFF4A0000);
+      skyBottom = const Color(0xFF1A0000);
+    } else if (stage == 2) {
+      skyTop = const Color(0xFF0A2F1D);
+      skyBottom = const Color(0xFF113823);
+    } else if (stage == 3) {
+      skyTop = const Color(0xFF2B0000);
+      skyBottom = const Color(0xFF800000);
+    }
 
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), Paint()..color = skyColor);
+    final bgPaint = Paint()
+      ..shader = LinearGradient(colors: [skyTop, skyBottom], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+          .createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     canvas.save();
     double offsetX = (shakeTime > 0) ? (Random().nextDouble() - 0.5) * 8 : 0;
     double offsetY = (shakeTime > 0) ? (Random().nextDouble() - 0.5) * 8 : 0;
     canvas.translate(-cameraX + offsetX, offsetY);
 
-    // Platforms
+    // Platform Textured Render
     for (var p in platforms) {
-      Color platformColor = const Color(0xFF8B4513);
+      Color bodyColor = const Color(0xFF8B4513);
       Color topColor = const Color(0xFF2ECC71);
       if (stage == 2) {
-        platformColor = const Color(0xFF1C2833);
+        bodyColor = const Color(0xFF1C2833);
         topColor = const Color(0xFF27AE60);
       } else if (stage == 3 || inBossLair) {
-        platformColor = const Color(0xFF1A0000);
+        bodyColor = const Color(0xFF1A0000);
         topColor = const Color(0xFFFF3300);
       }
-      canvas.drawRect(Rect.fromLTWH(p.x, p.y, p.w, p.h), Paint()..color = platformColor);
+      canvas.drawRect(Rect.fromLTWH(p.x, p.y, p.w, p.h), Paint()..color = bodyColor);
       canvas.drawRect(Rect.fromLTWH(p.x, p.y, p.w, 6), Paint()..color = topColor);
     }
 
-    // Pipes
+    // Pipes Render
+    void drawPipe(Pipe pipe, Color mainColor, Color topColor) {
+      canvas.drawRect(Rect.fromLTWH(pipe.x, pipe.y, pipe.w, pipe.h), Paint()..color = mainColor);
+      canvas.drawRect(Rect.fromLTWH(pipe.x - 3, pipe.y, pipe.w + 6, 10), Paint()..color = topColor);
+      canvas.drawRect(Rect.fromLTWH(pipe.x + 4, pipe.y, 4, pipe.h), Paint()..color = Colors.white24);
+    }
+
     for (var sp in secretPipes) {
-      canvas.drawRect(Rect.fromLTWH(sp.x, sp.y, sp.w, sp.h), Paint()..color = const Color(0xFF1E8449));
-      canvas.drawRect(Rect.fromLTWH(sp.x - 3, sp.y, sp.w + 6, 10), Paint()..color = const Color(0xFF27AE60));
+      drawPipe(sp, const Color(0xFF1E8449), const Color(0xFF27AE60));
     }
     for (var bp in bossPipes) {
-      canvas.drawRect(Rect.fromLTWH(bp.x, bp.y, bp.w, bp.h), Paint()..color = const Color(0xFFC0392B));
-      canvas.drawRect(Rect.fromLTWH(bp.x - 3, bp.y, bp.w + 6, 10), Paint()..color = const Color(0xFFE74C3C));
+      drawPipe(bp, const Color(0xFFC0392B), const Color(0xFFE74C3C));
     }
 
     // Question Blocks
     for (var qb in questionBlocks) {
       canvas.drawRect(Rect.fromLTWH(qb.x, qb.y, qb.w, qb.h), Paint()..color = qb.used ? Colors.grey : const Color(0xFFF39C12));
+      if (!qb.used) {
+        final tp = TextPainter(
+          text: const TextSpan(text: '?', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(qb.x + 7, qb.y + 3));
+      }
     }
 
-    // Flag Pole
     if (flagPole != null) {
       canvas.drawRect(Rect.fromLTWH(flagPole!.x, flagPole!.y, flagPole!.w, flagPole!.h), Paint()..color = Colors.white);
       canvas.drawRect(Rect.fromLTWH(flagPole!.x + 10, flagPole!.y, 30, 20), Paint()..color = Colors.red);
     }
 
-    // Items
     for (var item in items) {
       if (item.collected) continue;
       String icon = '🍖';
@@ -961,45 +1141,73 @@ class GamePainter extends CustomPainter {
       tp.paint(canvas, Offset(item.x, item.y));
     }
 
-    // Enemies
     for (var e in enemies) {
       if (!e.alive) continue;
-      Color enemyColor = const Color(0xFFCC3300);
-      if (e.type == 'shield') enemyColor = const Color(0xFF34495E);
-      if (e.type == 'bat') enemyColor = const Color(0xFF76B900);
-      canvas.drawRect(Rect.fromLTWH(e.x, e.y, e.w, e.h), Paint()..color = enemyColor);
+      if (e.type == 'shield') {
+        canvas.drawRect(Rect.fromLTWH(e.x, e.y, e.w, e.h), Paint()..color = const Color(0xFF34495E));
+        canvas.drawRect(Rect.fromLTWH(e.x + (e.dx > 0 ? e.w - 4 : 0), e.y, 4, e.h), Paint()..color = const Color(0xFFBDC3C7));
+      } else if (e.type == 'bat') {
+        canvas.drawRect(Rect.fromLTWH(e.x, e.y, e.w, e.h), Paint()..color = const Color(0xFF76B900));
+        canvas.drawRect(Rect.fromLTWH(e.x - 6, e.y + 4, 6, 4), Paint()..color = const Color(0xFFCCFF00));
+        canvas.drawRect(Rect.fromLTWH(e.x + e.w, e.y + 4, 6, 4), Paint()..color = const Color(0xFFCCFF00));
+      } else {
+        canvas.drawRect(Rect.fromLTWH(e.x, e.y, e.w, e.h), Paint()..color = const Color(0xFFCC3300));
+      }
     }
 
-    // Boss MetalGreymon
+    // Boss Render (With Enrage Visuals)
     if (boss != null && boss!.alive) {
-      canvas.drawRect(Rect.fromLTWH(boss!.x, boss!.y, boss!.w, boss!.h), Paint()..color = const Color(0xFF922B21));
+      Color bossBody = boss!.isEnraged ? Colors.red.shade900 : const Color(0xFF922B21);
+      canvas.drawRect(Rect.fromLTWH(boss!.x - 12, boss!.y + 10, 12, 20), Paint()..color = Colors.blueGrey);
+      canvas.drawRect(Rect.fromLTWH(boss!.x + boss!.w, boss!.y + 10, 12, 20), Paint()..color = Colors.blueGrey);
+      canvas.drawRect(Rect.fromLTWH(boss!.x, boss!.y, boss!.w, boss!.h), Paint()..color = bossBody);
+
       if (boss!.hasShield) {
         canvas.drawRect(
-          Rect.fromLTWH(boss!.x - 4, boss!.y - 4, boss!.w + 8, boss!.h + 8),
+          Rect.fromLTWH(boss!.x - 6, boss!.y - 6, boss!.w + 12, boss!.h + 12),
           Paint()
             ..color = Colors.cyan
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2,
         );
       }
-      canvas.drawRect(Rect.fromLTWH(boss!.x, boss!.y - 10, (boss!.hp / boss!.maxHp) * boss!.w, 5), Paint()..color = Colors.red);
+      canvas.drawRect(Rect.fromLTWH(boss!.x, boss!.y - 12, boss!.w, 5), Paint()..color = Colors.black);
+      canvas.drawRect(Rect.fromLTWH(boss!.x, boss!.y - 12, (boss!.hp / boss!.maxHp) * boss!.w, 5), Paint()..color = Colors.red);
     }
 
-    // Fireballs
+    // Fireballs & Mega Flame Particles
     for (var fb in fireballs) {
-      canvas.drawCircle(Offset(fb.x, fb.y), 5, Paint()..color = Colors.deepOrange);
+      double r = fb.isMegaFlame ? 10 : 5;
+      Color fColor = fb.isMegaFlame ? Colors.yellow : Colors.deepOrange;
+      canvas.drawCircle(Offset(fb.x, fb.y), r, Paint()..color = fColor);
     }
     for (var bfb in bossFireballs) {
       canvas.drawCircle(Offset(bfb.x, bfb.y), 6, Paint()..color = Colors.purpleAccent);
     }
 
-    // Player Agumon
-    canvas.drawRect(Rect.fromLTWH(player.x, player.y + 4, player.w, player.h - 4), Paint()..color = const Color(0xFFFF9900));
-    canvas.drawRect(Rect.fromLTWH(player.x + 4, player.y + 10, player.w - 8, player.h - 14), Paint()..color = const Color(0xFFFFCC66));
+    // Particle Render
+    for (var pt in particles) {
+      canvas.drawCircle(Offset(pt.x, pt.y), pt.size, Paint()..color = pt.color.withOpacity(max(0, pt.life)));
+    }
+
+    // Dynamic Player Render (Agumon / Greymon)
+    double px = player.x;
+    double py = player.y;
+    double pw = player.w;
+    double ph = player.h;
+
+    Color skinColor = player.isEvolved ? const Color(0xFFE67E22) : const Color(0xFFFF9900);
+    canvas.drawRect(Rect.fromLTWH(px, py + 4, pw, ph - 4), Paint()..color = skinColor);
+    canvas.drawRect(Rect.fromLTWH(px + 4, py + 12, pw - 8, ph - 16), Paint()..color = const Color(0xFFFFCC66));
     canvas.drawRect(
-      Rect.fromLTWH(player.facingRight ? player.x + player.w - 6 : player.x + 2, player.y + 6, 4, 6),
+      Rect.fromLTWH(player.facingRight ? px + pw - 6 : px + 2, py + 6, 4, 6),
       Paint()..color = Colors.black,
     );
+
+    // Tanduk Biru Greymon jika Evolusi
+    if (player.isEvolved) {
+      canvas.drawRect(Rect.fromLTWH(px + (player.facingRight ? pw - 4 : -4), py - 6, 8, 8), Paint()..color = Colors.blueGrey);
+    }
 
     // Floating Texts
     for (var ft in floatingTexts) {
