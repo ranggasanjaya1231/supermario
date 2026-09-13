@@ -27,7 +27,7 @@ class MyApp extends StatelessWidget {
 }
 
 // ==========================================
-// GAME MODELS & ENGINE PARTICLES
+// GAME MODELS & PARTICLES
 // ==========================================
 class Player {
   double x = 50;
@@ -40,8 +40,7 @@ class Player {
   bool facingRight = true;
   int jumps = 0;
 
-  // Evolution State
-  bool isEvolved = false; // Agumon -> Greymon
+  bool isEvolved = false;
   double evolveTimer = 0;
 
   double get w => isEvolved ? baseW * 1.5 : baseW;
@@ -71,7 +70,7 @@ class Pipe {
 class Enemy {
   int id;
   double x, y, baseY, w, h, dx, minX, maxX;
-  String type; // 'walker', 'shield', 'bat'
+  String type;
   double animTimer = 0;
   bool alive;
   Enemy(this.id, this.x, this.y, this.w, this.h, this.dx, this.minX, this.maxX, {this.type = 'walker', this.alive = true})
@@ -151,7 +150,7 @@ class _GameScreenState extends State<GameScreen> {
   Timer? gameLoopTimer;
   Player player = Player();
 
-  String gameMode = "playing"; // "playing", "paused", "banner", "gameover", "win"
+  String gameMode = "playing";
   int stage = 1;
   int lives = 3;
   int ammo = 30;
@@ -189,7 +188,6 @@ class _GameScreenState extends State<GameScreen> {
   String bannerTitle = "";
   String bannerDesc = "";
 
-  // Controls
   bool keyLeft = false;
   bool keyRight = false;
   bool keyUp = false;
@@ -389,7 +387,7 @@ class _GameScreenState extends State<GameScreen> {
   void evolveToGreymon() {
     setState(() {
       player.isEvolved = true;
-      player.evolveTimer = 15.0; // Evolusi 15 detik
+      player.evolveTimer = 15.0;
       floatingTexts.add(FloatingText("EVOLUSI GREYMON!!", player.x, player.y - 20));
       spawnExplosion(player.x, player.y, Colors.orange, count: 20);
     });
@@ -399,7 +397,6 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       if (shakeTime > 0) shakeTime -= dt;
 
-      // Timer Evolusi Player
       if (player.isEvolved) {
         player.evolveTimer -= dt;
         if (player.evolveTimer <= 0) {
@@ -408,7 +405,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Horizontal Movement
       if (keyLeft) {
         player.dx = -160;
         player.facingRight = false;
@@ -424,7 +420,6 @@ class _GameScreenState extends State<GameScreen> {
       if (player.dy > 600) player.dy = 600;
       player.y += player.dy * dt;
 
-      // Platform Collisions
       player.grounded = false;
       for (var p in platforms) {
         if (player.x < p.x + p.w &&
@@ -442,7 +437,6 @@ class _GameScreenState extends State<GameScreen> {
 
       cameraX = inBossLair ? 0 : max(0, player.x - 120);
 
-      // Secret & Boss Pipes Interactions
       for (var sp in secretPipes) {
         if (keyDown &&
             player.x + player.w > sp.x &&
@@ -470,7 +464,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Question Blocks
       for (var qb in questionBlocks) {
         if (!qb.used &&
             player.x < qb.x + qb.w &&
@@ -486,7 +479,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Items Collection
       for (var item in items) {
         if (!item.collected &&
             player.x < item.x + 20 &&
@@ -504,7 +496,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Enemy Physics & Variasi Bat Sinusoidal
       for (var e in enemies) {
         if (!e.alive) continue;
         e.x += e.dx * dt;
@@ -512,7 +503,7 @@ class _GameScreenState extends State<GameScreen> {
 
         if (e.type == 'bat') {
           e.animTimer += dt * 4;
-          e.y = e.baseY + sin(e.animTimer) * 20; // Gerakan Terbang Gelombang
+          e.y = e.baseY + sin(e.animTimer) * 20;
         }
 
         if (player.x < e.x + e.w &&
@@ -523,7 +514,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Player Fireballs Movement & Dynamic Hitbox
       for (int i = fireballs.length - 1; i >= 0; i--) {
         var fb = fireballs[i];
         fb.x += fb.dx * dt;
@@ -540,7 +530,6 @@ class _GameScreenState extends State<GameScreen> {
           }
         }
 
-        // Hit Enemies
         double fbSize = fb.isMegaFlame ? 16 : 8;
         for (var e in enemies) {
           if (e.alive &&
@@ -558,7 +547,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Dynamic Boss AI & Enrage Mode
       if (boss != null && boss!.alive) {
         boss!.isEnraged = boss!.hp <= (boss!.maxHp / 2);
         double speedMult = boss!.isEnraged ? 1.8 : 1.0;
@@ -573,7 +561,6 @@ class _GameScreenState extends State<GameScreen> {
           if (boss!.shieldTimer <= 0) boss!.hasShield = true;
         }
 
-        // Tembakan Bos (Enraged = Tembakan Ganda)
         boss!.shootTimer += dt;
         double cooldown = boss!.isEnraged ? 1.2 : 2.1;
         if (boss!.shootTimer > cooldown) {
@@ -597,7 +584,6 @@ class _GameScreenState extends State<GameScreen> {
           handleDeath();
         }
 
-        // Player Fireball Hits Boss
         for (int i = fireballs.length - 1; i >= 0; i--) {
           var fb = fireballs[i];
           double fbSize = fb.isMegaFlame ? 16 : 8;
@@ -630,7 +616,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Boss Fireballs Hit Player
       for (int i = bossFireballs.length - 1; i >= 0; i--) {
         var bfb = bossFireballs[i];
         bfb.x += bfb.dx * dt;
@@ -646,7 +631,6 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
 
-      // Particles Physics
       for (int i = particles.length - 1; i >= 0; i--) {
         var p = particles[i];
         p.x += p.dx * dt;
@@ -655,7 +639,6 @@ class _GameScreenState extends State<GameScreen> {
         if (p.life <= 0) particles.removeAt(i);
       }
 
-      // Floating Texts
       for (int i = floatingTexts.length - 1; i >= 0; i--) {
         var ft = floatingTexts[i];
         ft.y -= 20 * dt;
@@ -723,7 +706,6 @@ class _GameScreenState extends State<GameScreen> {
     if (gameMode != "playing") return;
     if (ammo > 0) {
       ammo--;
-      // Tembakan Fleksibel (Lurus / Diagonally / Ke Atas)
       double fdx = player.facingRight ? 420 : -420;
       double fdy = 0;
       if (keyUp) {
@@ -794,7 +776,6 @@ class _GameScreenState extends State<GameScreen> {
                     inBossLair: inBossLair,
                   ),
                 ),
-                // HUD Bar
                 Positioned(
                   top: 8, left: 10, right: 10,
                   child: Row(
@@ -879,8 +860,6 @@ class _GameScreenState extends State<GameScreen> {
               ],
             ),
           ),
-
-          // Lower Control Dashboard (Retro Console Design)
           Expanded(
             flex: 45,
             child: Container(
@@ -892,7 +871,6 @@ class _GameScreenState extends State<GameScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  // Tas Inventory Bar
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.grey.shade700)),
@@ -907,8 +885,6 @@ class _GameScreenState extends State<GameScreen> {
                       ],
                     ),
                   ),
-
-                  // D-Pad Modern Retro Controller
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -1079,7 +1055,6 @@ class GamePainter extends CustomPainter {
     double offsetY = (shakeTime > 0) ? (Random().nextDouble() - 0.5) * 8 : 0;
     canvas.translate(-cameraX + offsetX, offsetY);
 
-    // Platform Textured Render
     for (var p in platforms) {
       Color bodyColor = const Color(0xFF8B4513);
       Color topColor = const Color(0xFF2ECC71);
@@ -1094,7 +1069,6 @@ class GamePainter extends CustomPainter {
       canvas.drawRect(Rect.fromLTWH(p.x, p.y, p.w, 6), Paint()..color = topColor);
     }
 
-    // Pipes Render
     void drawPipe(Pipe pipe, Color mainColor, Color topColor) {
       canvas.drawRect(Rect.fromLTWH(pipe.x, pipe.y, pipe.w, pipe.h), Paint()..color = mainColor);
       canvas.drawRect(Rect.fromLTWH(pipe.x - 3, pipe.y, pipe.w + 6, 10), Paint()..color = topColor);
@@ -1108,7 +1082,6 @@ class GamePainter extends CustomPainter {
       drawPipe(bp, const Color(0xFFC0392B), const Color(0xFFE74C3C));
     }
 
-    // Question Blocks
     for (var qb in questionBlocks) {
       canvas.drawRect(Rect.fromLTWH(qb.x, qb.y, qb.w, qb.h), Paint()..color = qb.used ? Colors.grey : const Color(0xFFF39C12));
       if (!qb.used) {
@@ -1155,7 +1128,6 @@ class GamePainter extends CustomPainter {
       }
     }
 
-    // Boss Render (With Enrage Visuals)
     if (boss != null && boss!.alive) {
       Color bossBody = boss!.isEnraged ? Colors.red.shade900 : const Color(0xFF922B21);
       canvas.drawRect(Rect.fromLTWH(boss!.x - 12, boss!.y + 10, 12, 20), Paint()..color = Colors.blueGrey);
@@ -1175,7 +1147,6 @@ class GamePainter extends CustomPainter {
       canvas.drawRect(Rect.fromLTWH(boss!.x, boss!.y - 12, (boss!.hp / boss!.maxHp) * boss!.w, 5), Paint()..color = Colors.red);
     }
 
-    // Fireballs & Mega Flame Particles
     for (var fb in fireballs) {
       double r = fb.isMegaFlame ? 10 : 5;
       Color fColor = fb.isMegaFlame ? Colors.yellow : Colors.deepOrange;
@@ -1185,12 +1156,10 @@ class GamePainter extends CustomPainter {
       canvas.drawCircle(Offset(bfb.x, bfb.y), 6, Paint()..color = Colors.purpleAccent);
     }
 
-    // Particle Render
     for (var pt in particles) {
       canvas.drawCircle(Offset(pt.x, pt.y), pt.size, Paint()..color = pt.color.withOpacity(max(0, pt.life)));
     }
 
-    // Dynamic Player Render (Agumon / Greymon)
     double px = player.x;
     double py = player.y;
     double pw = player.w;
@@ -1204,12 +1173,10 @@ class GamePainter extends CustomPainter {
       Paint()..color = Colors.black,
     );
 
-    // Tanduk Biru Greymon jika Evolusi
     if (player.isEvolved) {
       canvas.drawRect(Rect.fromLTWH(px + (player.facingRight ? pw - 4 : -4), py - 6, 8, 8), Paint()..color = Colors.blueGrey);
     }
 
-    // Floating Texts
     for (var ft in floatingTexts) {
       final tp = TextPainter(
         text: TextSpan(text: ft.text, style: TextStyle(color: Colors.yellow.withOpacity(max(0, ft.alpha)), fontSize: 9, fontWeight: FontWeight.bold)),
