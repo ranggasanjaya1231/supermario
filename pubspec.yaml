@@ -1,5 +1,5 @@
-name: my_flutter_app
-description: "Aplikasi Flutter Universal"
+name: digimon_mario_game
+description: "Super Mario Strategy - Digimon Edition"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-    flame: 1.8.2
 
 dev_dependencies:
   flutter_test:
