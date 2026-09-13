@@ -1,11 +1,7 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flame/game.dart';
-import 'package:flame/components.dart';
-import 'package:flame/events.dart';
-import 'package:flame/collisions.dart';
-import 'package:flame/widgets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,435 +27,44 @@ class MyApp extends StatelessWidget {
 }
 
 // ==========================================
-// GAME ENGINE MAIN CLASS
+// GAME STATE & MODELS
 // ==========================================
-class DigimonGame extends FlameGame with HasCollisionDetection, HasKeyboardHandlerComponents {
-  int stage = 1;
-  int lives = 3;
-  int ammo = 30;
-  int maxAmmo = 99;
-  int score = 0;
-  bool godMode = false;
+class Player {
+  double x = 50;
+  double y = 100;
+  double w = 28;
+  double h = 32;
+  double dx = 0;
+  double dy = 0;
+  bool grounded = false;
+  bool facingRight = true;
+}
 
-  // Inventory & Buffs
-  int daging = 0;
-  int ramuan = 0;
-  int sisik = 0;
-  int cakar = 0;
-  bool kunci = false;
+class Block {
+  double x, y, w, h;
+  Block(this.x, this.y, this.w, this.h);
+}
 
-  bool isInvincible = false;
-  bool isDoubleDamage = false;
+class Enemy {
+  double x, y, w, h, dx, minX, maxX;
+  bool alive = true;
+  Enemy(this.x, this.y, this.w, this.h, this.dx, this.minX, this.maxX);
+}
 
-  late PlayerAgumon player;
-  late CameraComponent cameraComp;
-  late World gameWorld;
+class Fireball {
+  double x, y, dx;
+  Fireball(this.x, this.y, this.dx);
+}
 
-  final VoidCallback onUIUpdate;
-
-  DigimonGame({required this.onUIUpdate});
-
-  @override
-  Future<void> onLoad() async {
-    gameWorld = World();
-    add(gameWorld);
-
-    player = PlayerAgumon();
-    gameWorld.add(player);
-
-    cameraComp = CameraComponent(world: gameWorld);
-    cameraComp.viewfinder.anchor = Anchor.centerLeft;
-    add(cameraComp);
-
-    buildStage(1);
-  }
-
-  void buildStage(int stgNo) {
-    stage = stgNo;
-    gameWorld.children.where((c) => c != player).forEach((c) => c.removeFromParent());
-
-    player.position = Vector2(50, 100);
-    player.velocity = Vector2.zero();
-
-    if (stage == 1) {
-      _buildPlatform(0, 220, 900, 50);
-      _buildPlatform(980, 130, 180, 20);
-      _buildPlatform(1240, 70, 200, 20);
-      _buildPlatform(1500, 220, 1000, 50);
-
-      gameWorld.add(QuestionBlock(position: Vector2(250, 110), type: 'ammo'));
-      gameWorld.add(QuestionBlock(position: Vector2(1020, 60), type: 'heart'));
-
-      gameWorld.add(EnemyWalker(position: Vector2(600, 194), minX: 520, maxX: 680));
-      gameWorld.add(EnemyWalker(position: Vector2(750, 194), minX: 680, maxX: 820));
-      gameWorld.add(EnemyWalker(position: Vector2(1550, 194), minX: 1450, maxX: 1650));
-
-      gameWorld.add(GameItem(type: 'daging', position: Vector2(350, 180)));
-      gameWorld.add(GameItem(type: 'ramuan', position: Vector2(700, 180)));
-      gameWorld.add(GameItem(type: 'sisik', position: Vector2(1300, 40)));
-      gameWorld.add(GameItem(type: 'kunci', position: Vector2(1900, 180)));
-
-      gameWorld.add(FlagPole(position: Vector2(2300, 60)));
-    } else if (stage == 2) {
-      _buildPlatform(0, 220, 700, 50);
-      _buildPlatform(780, 120, 200, 20);
-      _buildPlatform(1050, 220, 1200, 50);
-
-      gameWorld.add(EnemyShield(position: Vector2(500, 194), minX: 440, maxX: 560));
-      gameWorld.add(EnemyShield(position: Vector2(900, 94), minX: 850, maxX: 950));
-      gameWorld.add(EnemyWalker(position: Vector2(1200, 194), minX: 1120, maxX: 1280));
-
-      gameWorld.add(GameItem(type: 'ramuan', position: Vector2(200, 180)));
-      gameWorld.add(GameItem(type: 'cakar', position: Vector2(850, 90)));
-      gameWorld.add(GameItem(type: 'kunci', position: Vector2(1650, 180)));
-
-      gameWorld.add(FlagPole(position: Vector2(2000, 60)));
-    } else if (stage == 3) {
-      _buildPlatform(0, 220, 1000, 50);
-      gameWorld.add(BossMetalGreymon(position: Vector2(600, 130)));
-    }
-
-    onUIUpdate();
-  }
-
-  void _buildPlatform(double x, double y, double w, double h) {
-    gameWorld.add(PlatformBlock(position: Vector2(x, y), size: Vector2(w, h)));
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    cameraComp.viewfinder.position = Vector2(max(0, player.position.x - 100), 0);
-  }
-
-  void jumpPlayer() => player.jump();
-
-  void shootPlayer() {
-    if (godMode || ammo > 0) {
-      if (!godMode) ammo--;
-      gameWorld.add(Fireball(
-        position: Vector2(player.position.x + (player.isFacingRight ? 30 : -10), player.position.y + 10),
-        isRight: player.isFacingRight,
-      ));
-      onUIUpdate();
-    }
-  }
-
-  void useItem(String item) {
-    if (item == 'daging' && daging > 0) {
-      daging--; lives = min(5, lives + 1);
-    } else if (item == 'ramuan' && ramuan > 0) {
-      ramuan--; ammo = min(maxAmmo, ammo + 20);
-    } else if (item == 'sisik' && sisik > 0) {
-      sisik--; isInvincible = true;
-      Future.delayed(const Duration(seconds: 5), () => isInvincible = false);
-    } else if (item == 'cakar' && cakar > 0) {
-      cakar--; isDoubleDamage = true;
-      Future.delayed(const Duration(seconds: 10), () => isDoubleDamage = false);
-    }
-    onUIUpdate();
-  }
-
-  void handleDeath() {
-    if (godMode || isInvincible) return;
-    lives--;
-    onUIUpdate();
-    if (lives > 0) {
-      player.position = Vector2(50, 100);
-      player.velocity = Vector2.zero();
-    } else {
-      buildStage(1);
-      lives = 3;
-      ammo = 30;
-      score = 0;
-      onUIUpdate();
-    }
-  }
+class Item {
+  String type;
+  double x, y;
+  bool collected = false;
+  Item(this.type, this.x, this.y);
 }
 
 // ==========================================
-// GAME COMPONENTS & PHYSICS
-// ==========================================
-class PlayerAgumon extends PositionComponent with HasGameRef<DigimonGame>, CollisionCallbacks {
-  Vector2 velocity = Vector2.zero();
-  bool isGrounded = false;
-  bool isFacingRight = true;
-  final double gravity = 950.0;
-
-  PlayerAgumon() : super(size: Vector2(28, 32)) {
-    add(RectangleHitbox());
-  }
-
-  void move(double dir) {
-    velocity.x = dir * 160;
-    if (dir != 0) isFacingRight = dir > 0;
-  }
-
-  void jump() {
-    if (isGrounded) {
-      velocity.y = -400;
-      isGrounded = false;
-    }
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    velocity.y += gravity * dt;
-    if (velocity.y > 600) velocity.y = 600;
-    position += velocity * dt;
-
-    if (position.y > 400) gameRef.handleDeath();
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlatformBlock) {
-      if (velocity.y > 0 && position.y + size.y - velocity.y * 0.016 <= other.position.y + 10) {
-        position.y = other.position.y - size.y;
-        velocity.y = 0;
-        isGrounded = true;
-      }
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    final paintBody = Paint()..color = const Color(0xFFFF9900);
-    final paintBelly = Paint()..color = const Color(0xFFFFCC66);
-    final paintEye = Paint()..color = Colors.black;
-
-    canvas.drawRect(Rect.fromLTWH(0, 4, size.x, size.y - 4), paintBody);
-    canvas.drawRect(Rect.fromLTWH(4, 10, size.x - 8, size.y - 14), paintBelly);
-    canvas.drawRect(Rect.fromLTWH(isFacingRight ? size.x - 6 : 2, 2, 4, 6), paintEye);
-  }
-}
-
-class PlatformBlock extends PositionComponent with CollisionCallbacks {
-  PlatformBlock({required Vector2 position, required Vector2 size})
-      : super(position: position, size: size) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF8B4513));
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.x, 6), Paint()..color = const Color(0xFF2ECC71));
-  }
-}
-
-class EnemyWalker extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  double dir = 1;
-  final double minX, maxX;
-  EnemyWalker({required Vector2 position, required this.minX, required this.maxX})
-      : super(position: position, size: Vector2(26, 26)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += dir * 60 * dt;
-    if (position.x > maxX || position.x < minX) dir *= -1;
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) gameRef.handleDeath();
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFFCC3300));
-  }
-}
-
-class EnemyShield extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  double dir = 1;
-  final double minX, maxX;
-  EnemyShield({required Vector2 position, required this.minX, required this.maxX})
-      : super(position: position, size: Vector2(26, 26)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += dir * 50 * dt;
-    if (position.x > maxX || position.x < minX) dir *= -1;
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) gameRef.handleDeath();
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF34495E));
-  }
-}
-
-class BossMetalGreymon extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  int hp = 12;
-  double dir = -1;
-
-  BossMetalGreymon({required Vector2 position}) : super(position: position, size: Vector2(60, 54)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += dir * 80 * dt;
-    if (position.x < 400 || position.x > 800) dir *= -1;
-  }
-
-  void takeDamage(int dmg) {
-    hp -= dmg;
-    if (hp <= 0) {
-      removeFromParent();
-      gameRef.buildStage(1);
-    }
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) gameRef.handleDeath();
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF922B21));
-    canvas.drawRect(Rect.fromLTWH(0, -10, (hp / 12) * size.x, 5), Paint()..color = Colors.red);
-  }
-}
-
-class Fireball extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  final bool isRight;
-  Fireball({required Vector2 position, required this.isRight})
-      : super(position: position, size: Vector2(10, 10)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += (isRight ? 380 : -380) * dt;
-    if (position.x > playerXLimit() || position.x < -100) removeFromParent();
-  }
-
-  double playerXLimit() => gameRef.player.position.x + 800;
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is EnemyWalker) {
-      other.removeFromParent();
-      removeFromParent();
-    } else if (other is EnemyShield) {
-      other.removeFromParent();
-      removeFromParent();
-    } else if (other is BossMetalGreymon) {
-      other.takeDamage(gameRef.isDoubleDamage ? 2 : 1);
-      removeFromParent();
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawCircle(Offset(size.x / 2, size.y / 2), 5, Paint()..color = Colors.deepOrange);
-  }
-}
-
-class GameItem extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  final String type;
-  GameItem({required this.type, required Vector2 position})
-      : super(position: position, size: Vector2(20, 20)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) {
-      if (type == 'daging') gameRef.daging++;
-      if (type == 'ramuan') gameRef.ramuan++;
-      if (type == 'sisik') gameRef.sisik++;
-      if (type == 'cakar') gameRef.cakar++;
-      if (type == 'kunci') gameRef.kunci = true;
-      gameRef.onUIUpdate();
-      removeFromParent();
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    String icon = '🍖';
-    if (type == 'ramuan') icon = '🧪';
-    if (type == 'sisik') icon = '🛡️';
-    if (type == 'cakar') icon = '🔥';
-    if (type == 'kunci') icon = '🔑';
-
-    final textPainter = TextPainter(
-      text: TextSpan(text: icon, style: const TextStyle(fontSize: 14)),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    textPainter.paint(canvas, Offset.zero);
-  }
-}
-
-class QuestionBlock extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  final String type;
-  bool isUsed = false;
-  QuestionBlock({required Vector2 position, required this.type})
-      : super(position: position, size: Vector2(24, 24)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon && !isUsed) {
-      isUsed = true;
-      if (type == 'ammo') gameRef.ammo = min(gameRef.maxAmmo, gameRef.ammo + 10);
-      if (type == 'heart') gameRef.lives = min(5, gameRef.lives + 1);
-      gameRef.onUIUpdate();
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = isUsed ? Colors.grey : Colors.orangeAccent);
-  }
-}
-
-class FlagPole extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  FlagPole({required Vector2 position}) : super(position: position, size: Vector2(10, 160)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) {
-      gameRef.buildStage(gameRef.stage + 1);
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = Colors.white);
-    canvas.drawRect(Rect.fromLTWH(10, 0, 30, 20), Paint()..color = Colors.red);
-  }
-}
-
-// ==========================================
-// FLUTTER DASHBOARD & HUD UI
+// MAIN GAME SCREEN (UI & ENGINE LOOP)
 // ==========================================
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -469,12 +74,243 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
-  late DigimonGame game;
+  Timer? gameLoopTimer;
+  Player player = Player();
+
+  int stage = 1;
+  int lives = 3;
+  int ammo = 30;
+  double cameraX = 0;
+
+  // Inventory
+  int daging = 0;
+  int ramuan = 0;
+  int sisik = 0;
+  int cakar = 0;
+  bool kunci = false;
+
+  bool isInvincible = false;
+  bool isDoubleDamage = false;
+
+  List<Block> platforms = [];
+  List<Enemy> enemies = [];
+  List<Fireball> fireballs = [];
+  List<Item> items = [];
+  Block? flagPole;
+
+  bool keyLeft = false;
+  bool keyRight = false;
 
   @override
   void initState() {
     super.initState();
-    game = DigimonGame(onUIUpdate: () => setState(() {}));
+    loadStage(1);
+    startGameLoop();
+  }
+
+  @override
+  void dispose() {
+    gameLoopTimer?.cancel();
+    super.dispose();
+  }
+
+  void loadStage(int stgNo) {
+    stage = stgNo;
+    player.x = 50;
+    player.y = 100;
+    player.dx = 0;
+    player.dy = 0;
+    fireballs.clear();
+
+    if (stage == 1) {
+      platforms = [
+        Block(0, 220, 900, 50),
+        Block(980, 140, 180, 20),
+        Block(1240, 80, 200, 20),
+        Block(1500, 220, 1000, 50),
+      ];
+      enemies = [
+        Enemy(600, 194, 26, 26, 80, 500, 700),
+        Enemy(750, 194, 26, 26, -70, 650, 850),
+        Enemy(1600, 194, 26, 26, 90, 1500, 1750),
+      ];
+      items = [
+        Item('daging', 350, 180),
+        Item('ramuan', 700, 180),
+        Item('sisik', 1300, 40),
+        Item('kunci', 1900, 180),
+      ];
+      flagPole = Block(2300, 60, 10, 160);
+    } else if (stage == 2) {
+      platforms = [
+        Block(0, 220, 700, 50),
+        Block(780, 120, 200, 20),
+        Block(1050, 220, 1200, 50),
+      ];
+      enemies = [
+        Enemy(500, 194, 26, 26, 60, 400, 600),
+        Enemy(900, 94, 26, 26, -70, 800, 950),
+      ];
+      items = [
+        Item('ramuan', 200, 180),
+        Item('cakar', 850, 80),
+        Item('kunci', 1650, 180),
+      ];
+      flagPole = Block(2000, 60, 10, 160);
+    }
+  }
+
+  void startGameLoop() {
+    gameLoopTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+      updatePhysics(0.016);
+    });
+  }
+
+  void updatePhysics(double dt) {
+    setState(() {
+      // Horizontal Input
+      if (keyLeft) {
+        player.dx = -160;
+        player.facingRight = false;
+      } else if (keyRight) {
+        player.dx = 160;
+        player.facingRight = true;
+      } else {
+        player.dx = 0;
+      }
+
+      player.x += player.dx * dt;
+
+      // Gravity & Vertical Movement
+      player.dy += 950 * dt;
+      if (player.dy > 600) player.dy = 600;
+      player.y += player.dy * dt;
+
+      // Platform Collisions
+      player.grounded = false;
+      for (var p in platforms) {
+        if (player.x < p.x + p.w &&
+            player.x + player.w > p.x &&
+            player.y < p.y + p.h &&
+            player.y + player.h > p.y) {
+          if (player.dy >= 0 && player.y + player.h - player.dy * dt <= p.y + 12) {
+            player.y = p.y - player.h;
+            player.dy = 0;
+            player.grounded = true;
+          }
+        }
+      }
+
+      // Camera Follow
+      cameraX = max(0, player.x - 120);
+
+      // Enemy Logic
+      for (var e in enemies) {
+        if (!e.alive) continue;
+        e.x += e.dx * dt;
+        if (e.x < e.minX || e.x > e.maxX) e.dx *= -1;
+
+        // Hit Player
+        if (player.x < e.x + e.w &&
+            player.x + player.w > e.x &&
+            player.y < e.y + e.h &&
+            player.y + player.h > e.y) {
+          handleDeath();
+        }
+      }
+
+      // Fireballs Movement & Hits
+      for (int i = fireballs.length - 1; i >= 0; i--) {
+        var fb = fireballs[i];
+        fb.x += fb.dx * dt;
+
+        for (var e in enemies) {
+          if (e.alive &&
+              fb.x < e.x + e.w &&
+              fb.x + 10 > e.x &&
+              fb.y < e.y + e.h &&
+              fb.y + 10 > e.y) {
+            e.alive = false;
+            fireballs.removeAt(i);
+            break;
+          }
+        }
+      }
+
+      // Item Collection
+      for (var item in items) {
+        if (!item.collected &&
+            player.x < item.x + 20 &&
+            player.x + player.w > item.x &&
+            player.y < item.y + 20 &&
+            player.y + player.h > item.y) {
+          item.collected = true;
+          if (item.type == 'daging') daging++;
+          if (item.type == 'ramuan') ramuan++;
+          if (item.type == 'sisik') sisik++;
+          if (item.type == 'cakar') cakar++;
+          if (item.type == 'kunci') kunci = true;
+        }
+      }
+
+      // Flag Goal Check
+      if (flagPole != null && player.x > flagPole!.x) {
+        loadStage(stage == 1 ? 2 : 1);
+      }
+
+      // Fall off Screen
+      if (player.y > 350) handleDeath();
+    });
+  }
+
+  void handleDeath() {
+    if (isInvincible) return;
+    lives--;
+    if (lives > 0) {
+      player.x = 50;
+      player.y = 100;
+      player.dy = 0;
+    } else {
+      lives = 3;
+      ammo = 30;
+      loadStage(1);
+    }
+  }
+
+  void jump() {
+    if (player.grounded) {
+      player.dy = -400;
+      player.grounded = false;
+    }
+  }
+
+  void shoot() {
+    if (ammo > 0) {
+      ammo--;
+      fireballs.add(Fireball(
+        player.x + (player.facingRight ? 30 : -10),
+        player.y + 10,
+        player.facingRight ? 380 : -380,
+      ));
+    }
+  }
+
+  void useItem(String type) {
+    if (type == 'daging' && daging > 0) {
+      daging--;
+      lives = min(5, lives + 1);
+    } else if (type == 'ramuan' && ramuan > 0) {
+      ramuan--;
+      ammo = min(99, ammo + 20);
+    } else if (type == 'sisik' && sisik > 0) {
+      sisik--;
+      isInvincible = true;
+      Future.delayed(const Duration(seconds: 5), () => setState(() => isInvincible = false));
+    } else if (type == 'cakar' && cakar > 0) {
+      cakar--;
+      isDoubleDamage = true;
+      Future.delayed(const Duration(seconds: 10), () => setState(() => isDoubleDamage = false));
+    }
   }
 
   @override
@@ -482,22 +318,34 @@ class _GameScreenState extends State<GameScreen> {
     return Scaffold(
       body: Column(
         children: [
+          // 55% Top Screen Game Canvas
           Expanded(
             flex: 55,
             child: Stack(
               children: [
-                GameWidget(game: game),
+                CustomPaint(
+                  size: Size.infinite,
+                  painter: GamePainter(
+                    player: player,
+                    platforms: platforms,
+                    enemies: enemies,
+                    fireballs: fireballs,
+                    items: items,
+                    flagPole: flagPole,
+                    cameraX: cameraX,
+                  ),
+                ),
                 Positioned(
                   top: 10, left: 10, right: 10,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text("STG: 1-${game.stage}", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace')),
+                      Text("STG: 1-$stage", style: const TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'monospace')),
                       Row(
                         children: [
-                          Text("❤️" * game.lives, style: const TextStyle(fontSize: 10)),
-                          const SizedBox(width: 10),
-                          Text("🔫 ${game.godMode ? '∞' : game.ammo}", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace')),
+                          Text("❤️" * lives, style: const TextStyle(fontSize: 11)),
+                          const SizedBox(width: 12),
+                          Text("🔫 $ammo", style: const TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'monospace')),
                         ],
                       ),
                     ],
@@ -506,6 +354,8 @@ class _GameScreenState extends State<GameScreen> {
               ],
             ),
           ),
+
+          // 45% Bottom Game Dashboard
           Expanded(
             flex: 45,
             child: Container(
@@ -514,47 +364,49 @@ class _GameScreenState extends State<GameScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
+                  // Inventory Bar
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(4)),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _invButton("🍖", game.daging, () => game.useItem('daging')),
-                        _invButton("🧪", game.ramuan, () => game.useItem('ramuan')),
-                        _invButton("🛡️", game.sisik, () => game.useItem('sisik')),
-                        _invButton("🔥", game.cakar, () => game.useItem('cakar')),
-                        Text("🔑 ${game.kunci ? '✅' : '❌'}", style: const TextStyle(fontSize: 10, color: Colors.white)),
+                        _invBtn("🍖", daging, () => useItem('daging')),
+                        _invBtn("🧪", ramuan, () => useItem('ramuan')),
+                        _invBtn("🛡️", sisik, () => useItem('sisik')),
+                        _invBtn("🔥", cakar, () => useItem('cakar')),
+                        Text("🔑 ${kunci ? '✅' : '❌'}", style: const TextStyle(fontSize: 10, color: Colors.white)),
                       ],
                     ),
                   ),
+
+                  // D-Pad and Action Buttons
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      // D-Pad
                       SizedBox(
                         width: 100, height: 100,
                         child: Stack(
                           children: [
                             Positioned(
                               left: 0, top: 33,
-                              child: _dirButton(Icons.arrow_left, (isPressed) {
-                                game.player.move(isPressed ? -1 : 0);
-                              }),
+                              child: _dirBtn(Icons.arrow_left, (down) => keyLeft = down),
                             ),
                             Positioned(
                               right: 0, top: 33,
-                              child: _dirButton(Icons.arrow_right, (isPressed) {
-                                game.player.move(isPressed ? 1 : 0);
-                              }),
+                              child: _dirBtn(Icons.arrow_right, (down) => keyRight = down),
                             ),
                           ],
                         ),
                       ),
+
+                      // Action Controls (A / B)
                       Row(
                         children: [
-                          _actionBtn("B", "FIRE", Colors.redAccent, game.shootPlayer),
+                          _actionBtn("B", "FIRE", Colors.redAccent, shoot),
                           const SizedBox(width: 15),
-                          _actionBtn("A", "JUMP", const Color(0xFF900C3F), game.jumpPlayer),
+                          _actionBtn("A", "JUMP", const Color(0xFF900C3F), jump),
                         ],
                       ),
                     ],
@@ -568,18 +420,18 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  Widget _invButton(String icon, int count, VoidCallback onTap) {
+  Widget _invBtn(String icon, int val, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(color: const Color(0xFF444444), borderRadius: BorderRadius.circular(4)),
-        child: Text("$icon $count", style: const TextStyle(fontSize: 10, color: Colors.white)),
+        child: Text("$icon $val", style: const TextStyle(fontSize: 10, color: Colors.white)),
       ),
     );
   }
 
-  Widget _dirButton(IconData icon, Function(bool) onPressed) {
+  Widget _dirBtn(IconData icon, Function(bool) onPressed) {
     return GestureDetector(
       onTapDown: (_) => onPressed(true),
       onTapUp: (_) => onPressed(false),
@@ -594,7 +446,7 @@ class _GameScreenState extends State<GameScreen> {
 
   Widget _actionBtn(String label, String sub, Color color, VoidCallback onTap) {
     return Column(
-      mainAxisSize: MainAxisSize.min, // FIX: MainAxisSize.min sudah benar
+      mainAxisSize: MainAxisSize.min,
       children: [
         GestureDetector(
           onTap: onTap,
@@ -610,605 +462,86 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
-  runApp(const MyApp());
-}
+// ==========================================
+// GAME CANVAS PAINTER
+// ==========================================
+class GamePainter extends CustomPainter {
+  final Player player;
+  final List<Block> platforms;
+  final List<Enemy> enemies;
+  final List<Fireball> fireballs;
+  final List<Item> items;
+  final Block? flagPole;
+  final double cameraX;
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  GamePainter({
+    required this.player,
+    required this.platforms,
+    required this.enemies,
+    required this.fireballs,
+    required this.items,
+    required this.flagPole,
+    required this.cameraX,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Super Mario Strategy - Digimon Edition',
-      theme: ThemeData.dark(),
-      home: const GameScreen(),
+  void paint(Canvas canvas, Size size) {
+    // Sky Background
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), Paint()..color = const Color(0xFF87CEEB));
+
+    canvas.save();
+    canvas.translate(-cameraX, 0);
+
+    // Platforms
+    for (var p in platforms) {
+      canvas.drawRect(Rect.fromLTWH(p.x, p.y, p.w, p.h), Paint()..color = const Color(0xFF8B4513));
+      canvas.drawRect(Rect.fromLTWH(p.x, p.y, p.w, 6), Paint()..color = const Color(0xFF2ECC71));
+    }
+
+    // Flag Pole
+    if (flagPole != null) {
+      canvas.drawRect(Rect.fromLTWH(flagPole!.x, flagPole!.y, flagPole!.w, flagPole!.h), Paint()..color = Colors.white);
+      canvas.drawRect(Rect.fromLTWH(flagPole!.x + 10, flagPole!.y, 30, 20), Paint()..color = Colors.red);
+    }
+
+    // Items
+    for (var item in items) {
+      if (item.collected) continue;
+      String icon = '🍖';
+      if (item.type == 'ramuan') icon = '🧪';
+      if (item.type == 'sisik') icon = '🛡️';
+      if (item.type == 'cakar') icon = '🔥';
+      if (item.type == 'kunci') icon = '🔑';
+
+      final tp = TextPainter(
+        text: TextSpan(text: icon, style: const TextStyle(fontSize: 14)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(item.x, item.y));
+    }
+
+    // Enemies
+    for (var e in enemies) {
+      if (!e.alive) continue;
+      canvas.drawRect(Rect.fromLTWH(e.x, e.y, e.w, e.h), Paint()..color = const Color(0xFFCC3300));
+    }
+
+    // Fireballs
+    for (var fb in fireballs) {
+      canvas.drawCircle(Offset(fb.x, fb.y), 5, Paint()..color = Colors.deepOrange);
+    }
+
+    // Player Agumon
+    canvas.drawRect(Rect.fromLTWH(player.x, player.y + 4, player.w, player.h - 4), Paint()..color = const Color(0xFFFF9900));
+    canvas.drawRect(Rect.fromLTWH(player.x + 4, player.y + 10, player.w - 8, player.h - 14), Paint()..color = const Color(0xFFFFCC66));
+    canvas.drawRect(
+      Rect.fromLTWH(player.facingRight ? player.x + player.w - 6 : player.x + 2, player.y + 6, 4, 6),
+      Paint()..color = Colors.black,
     );
-  }
-}
 
-// ==========================================
-// GAME ENGINE MAIN CLASS
-// ==========================================
-class DigimonGame extends FlameGame with HasCollisionDetection, HasKeyboardHandlerComponents {
-  int stage = 1;
-  int lives = 3;
-  int ammo = 30;
-  int maxAmmo = 99;
-  int score = 0;
-  bool godMode = false;
-
-  // Inventory & Buffs
-  int daging = 0;
-  int ramuan = 0;
-  int sisik = 0;
-  int cakar = 0;
-  bool kunci = false;
-
-  bool isInvincible = false;
-  bool isDoubleDamage = false;
-
-  late PlayerAgumon player;
-  late CameraComponent cameraComp;
-  late World gameWorld;
-
-  final VoidCallback onUIUpdate;
-
-  DigimonGame({required this.onUIUpdate});
-
-  @override
-  Future<void> onLoad() async {
-    gameWorld = World();
-    add(gameWorld);
-
-    player = PlayerAgumon();
-    gameWorld.add(player);
-
-    cameraComp = CameraComponent(world: gameWorld);
-    cameraComp.viewfinder.anchor = Anchor.centerLeft;
-    add(cameraComp);
-
-    buildStage(1);
-  }
-
-  void buildStage(int stgNo) {
-    stage = stgNo;
-    gameWorld.children.where((c) => c != player).forEach((c) => c.removeFromParent());
-
-    player.position = Vector2(50, 100);
-    player.velocity = Vector2.zero();
-
-    if (stage == 1) {
-      _buildPlatform(0, 220, 900, 50);
-      _buildPlatform(980, 130, 180, 20);
-      _buildPlatform(1240, 70, 200, 20);
-      _buildPlatform(1500, 220, 1000, 50);
-
-      gameWorld.add(QuestionBlock(position: Vector2(250, 110), type: 'ammo'));
-      gameWorld.add(QuestionBlock(position: Vector2(1020, 60), type: 'heart'));
-
-      gameWorld.add(EnemyWalker(position: Vector2(600, 194), minX: 520, maxX: 680));
-      gameWorld.add(EnemyWalker(position: Vector2(750, 194), minX: 680, maxX: 820));
-      gameWorld.add(EnemyWalker(position: Vector2(1550, 194), minX: 1450, maxX: 1650));
-
-      gameWorld.add(GameItem(type: 'daging', position: Vector2(350, 180)));
-      gameWorld.add(GameItem(type: 'ramuan', position: Vector2(700, 180)));
-      gameWorld.add(GameItem(type: 'sisik', position: Vector2(1300, 40)));
-      gameWorld.add(GameItem(type: 'kunci', position: Vector2(1900, 180)));
-
-      gameWorld.add(FlagPole(position: Vector2(2300, 60)));
-    } else if (stage == 2) {
-      _buildPlatform(0, 220, 700, 50);
-      _buildPlatform(780, 120, 200, 20);
-      _buildPlatform(1050, 220, 1200, 50);
-
-      gameWorld.add(EnemyShield(position: Vector2(500, 194), minX: 440, maxX: 560));
-      gameWorld.add(EnemyShield(position: Vector2(900, 94), minX: 850, maxX: 950));
-      gameWorld.add(EnemyWalker(position: Vector2(1200, 194), minX: 1120, maxX: 1280));
-
-      gameWorld.add(GameItem(type: 'ramuan', position: Vector2(200, 180)));
-      gameWorld.add(GameItem(type: 'cakar', position: Vector2(850, 90)));
-      gameWorld.add(GameItem(type: 'kunci', position: Vector2(1650, 180)));
-
-      gameWorld.add(FlagPole(position: Vector2(2000, 60)));
-    } else if (stage == 3) {
-      _buildPlatform(0, 220, 1000, 50);
-      gameWorld.add(BossMetalGreymon(position: Vector2(600, 130)));
-    }
-
-    onUIUpdate();
-  }
-
-  void _buildPlatform(double x, double y, double w, double h) {
-    gameWorld.add(PlatformBlock(position: Vector2(x, y), size: Vector2(w, h)));
+    canvas.restore();
   }
 
   @override
-  void update(double dt) {
-    super.update(dt);
-    cameraComp.viewfinder.position = Vector2(max(0, player.position.x - 100), 0);
-  }
-
-  void jumpPlayer() => player.jump();
-
-  void shootPlayer() {
-    if (godMode || ammo > 0) {
-      if (!godMode) ammo--;
-      gameWorld.add(Fireball(
-        position: Vector2(player.position.x + (player.isFacingRight ? 30 : -10), player.position.y + 10),
-        isRight: player.isFacingRight,
-      ));
-      onUIUpdate();
-    }
-  }
-
-  void useItem(String item) {
-    if (item == 'daging' && daging > 0) {
-      daging--; lives = min(5, lives + 1);
-    } else if (item == 'ramuan' && ramuan > 0) {
-      ramuan--; ammo = min(maxAmmo, ammo + 20);
-    } else if (item == 'sisik' && sisik > 0) {
-      sisik--; isInvincible = true;
-      Future.delayed(const Duration(seconds: 5), () => isInvincible = false);
-    } else if (item == 'cakar' && cakar > 0) {
-      cakar--; isDoubleDamage = true;
-      Future.delayed(const Duration(seconds: 10), () => isDoubleDamage = false);
-    }
-    onUIUpdate();
-  }
-
-  void handleDeath() {
-    if (godMode || isInvincible) return;
-    lives--;
-    onUIUpdate();
-    if (lives > 0) {
-      player.position = Vector2(50, 100);
-      player.velocity = Vector2.zero();
-    } else {
-      buildStage(1);
-      lives = 3;
-      ammo = 30;
-      score = 0;
-      onUIUpdate();
-    }
-  }
-}
-
-// ==========================================
-// GAME COMPONENTS & PHYSICS
-// ==========================================
-class PlayerAgumon extends PositionComponent with HasGameRef<DigimonGame>, CollisionCallbacks {
-  Vector2 velocity = Vector2.zero();
-  bool isGrounded = false;
-  bool isFacingRight = true;
-  final double gravity = 950.0;
-
-  PlayerAgumon() : super(size: Vector2(28, 32)) {
-    add(RectangleHitbox());
-  }
-
-  void move(double dir) {
-    velocity.x = dir * 160;
-    if (dir != 0) isFacingRight = dir > 0;
-  }
-
-  void jump() {
-    if (isGrounded) {
-      velocity.y = -400;
-      isGrounded = false;
-    }
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    velocity.y += gravity * dt;
-    if (velocity.y > 600) velocity.y = 600;
-    position += velocity * dt;
-
-    if (position.y > 400) gameRef.handleDeath();
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlatformBlock) {
-      if (velocity.y > 0 && position.y + size.y - velocity.y * 0.016 <= other.position.y + 10) {
-        position.y = other.position.y - size.y;
-        velocity.y = 0;
-        isGrounded = true;
-      }
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    final paintBody = Paint()..color = const Color(0xFFFF9900);
-    final paintBelly = Paint()..color = const Color(0xFFFFCC66);
-    final paintEye = Paint()..color = Colors.black;
-
-    canvas.drawRect(Rect.fromLTWH(0, 4, size.x, size.y - 4), paintBody);
-    canvas.drawRect(Rect.fromLTWH(4, 10, size.x - 8, size.y - 14), paintBelly);
-    canvas.drawRect(Rect.fromLTWH(isFacingRight ? size.x - 6 : 2, 2, 4, 6), paintEye);
-  }
-}
-
-class PlatformBlock extends PositionComponent with CollisionCallbacks {
-  PlatformBlock({required Vector2 position, required Vector2 size})
-      : super(position: position, size: size) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF8B4513));
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.x, 6), Paint()..color = const Color(0xFF2ECC71));
-  }
-}
-
-class EnemyWalker extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  double dir = 1;
-  final double minX, maxX;
-  EnemyWalker({required Vector2 position, required this.minX, required this.maxX})
-      : super(position: position, size: Vector2(26, 26)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += dir * 60 * dt;
-    if (position.x > maxX || position.x < minX) dir *= -1;
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) gameRef.handleDeath();
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFFCC3300));
-  }
-}
-
-class EnemyShield extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  double dir = 1;
-  final double minX, maxX;
-  EnemyShield({required Vector2 position, required this.minX, required this.maxX})
-      : super(position: position, size: Vector2(26, 26)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += dir * 50 * dt;
-    if (position.x > maxX || position.x < minX) dir *= -1;
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) gameRef.handleDeath();
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF34495E));
-  }
-}
-
-class BossMetalGreymon extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  int hp = 12;
-  double dir = -1;
-
-  BossMetalGreymon({required Vector2 position}) : super(position: position, size: Vector2(60, 54)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += dir * 80 * dt;
-    if (position.x < 400 || position.x > 800) dir *= -1;
-  }
-
-  void takeDamage(int dmg) {
-    hp -= dmg;
-    if (hp <= 0) {
-      removeFromParent();
-      gameRef.buildStage(1);
-    }
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) gameRef.handleDeath();
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF922B21));
-    canvas.drawRect(Rect.fromLTWH(0, -10, (hp / 12) * size.x, 5), Paint()..color = Colors.red);
-  }
-}
-
-class Fireball extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  final bool isRight;
-  Fireball({required Vector2 position, required this.isRight})
-      : super(position: position, size: Vector2(10, 10)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    position.x += (isRight ? 380 : -380) * dt;
-    if (position.x > playerXLimit() || position.x < -100) removeFromParent();
-  }
-
-  double playerXLimit() => gameRef.player.position.x + 800;
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is EnemyWalker) {
-      other.removeFromParent();
-      removeFromParent();
-    } else if (other is EnemyShield) {
-      other.removeFromParent();
-      removeFromParent();
-    } else if (other is BossMetalGreymon) {
-      other.takeDamage(gameRef.isDoubleDamage ? 2 : 1);
-      removeFromParent();
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawCircle(Offset(size.x / 2, size.y / 2), 5, Paint()..color = Colors.deepOrange);
-  }
-}
-
-class GameItem extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  final String type;
-  GameItem({required this.type, required Vector2 position})
-      : super(position: position, size: Vector2(20, 20)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) {
-      if (type == 'daging') gameRef.daging++;
-      if (type == 'ramuan') gameRef.ramuan++;
-      if (type == 'sisik') gameRef.sisik++;
-      if (type == 'cakar') gameRef.cakar++;
-      if (type == 'kunci') gameRef.kunci = true;
-      gameRef.onUIUpdate();
-      removeFromParent();
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    String icon = '🍖';
-    if (type == 'ramuan') icon = '🧪';
-    if (type == 'sisik') icon = '🛡️';
-    if (type == 'cakar') icon = '🔥';
-    if (type == 'kunci') icon = '🔑';
-
-    final textPainter = TextPainter(
-      text: TextSpan(text: icon, style: const TextStyle(fontSize: 14)),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    textPainter.paint(canvas, Offset.zero);
-  }
-}
-
-class QuestionBlock extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  final String type;
-  bool isUsed = false;
-  QuestionBlock({required Vector2 position, required this.type})
-      : super(position: position, size: Vector2(24, 24)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon && !isUsed) {
-      isUsed = true;
-      if (type == 'ammo') gameRef.ammo = min(gameRef.maxAmmo, gameRef.ammo + 10);
-      if (type == 'heart') gameRef.lives = min(5, gameRef.lives + 1);
-      gameRef.onUIUpdate();
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = isUsed ? Colors.grey : Colors.orangeAccent);
-  }
-}
-
-class FlagPole extends PositionComponent with CollisionCallbacks, HasGameRef<DigimonGame> {
-  FlagPole({required Vector2 position}) : super(position: position, size: Vector2(10, 160)) {
-    add(RectangleHitbox());
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    super.onCollision(intersectionPoints, other);
-    if (other is PlayerAgumon) {
-      gameRef.buildStage(gameRef.stage + 1);
-    }
-  }
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = Colors.white);
-    canvas.drawRect(Rect.fromLTWH(10, 0, 30, 20), Paint()..color = Colors.red);
-  }
-}
-
-// ==========================================
-// FLUTTER DASHBOARD & HUD UI
-// ==========================================
-class GameScreen extends StatefulWidget {
-  const GameScreen({super.key});
-
-  @override
-  State<GameScreen> createState() => _GameScreenState();
-}
-
-class _GameScreenState extends State<GameScreen> {
-  late DigimonGame game;
-
-  @override
-  void initState() {
-    super.initState();
-    game = DigimonGame(onUIUpdate: () => setState(() {}));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Column(
-        children: [
-          Expanded(
-            flex: 55,
-            child: Stack(
-              children: [
-                GameWidget(game: game),
-                Positioned(
-                  top: 10, left: 10, right: 10,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text("STG: 1-${game.stage}", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace')),
-                      Row(
-                        children: [
-                          Text("❤️" * game.lives, style: const TextStyle(fontSize: 10)),
-                          const SizedBox(width: 10),
-                          Text("🔫 ${game.godMode ? '∞' : game.ammo}", style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace')),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 45,
-            child: Container(
-              color: const Color(0xFFD3D3D3),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(4)),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _invButton("🍖", game.daging, () => game.useItem('daging')),
-                        _invButton("🧪", game.ramuan, () => game.useItem('ramuan')),
-                        _invButton("🛡️", game.sisik, () => game.useItem('sisik')),
-                        _invButton("🔥", game.cakar, () => game.useItem('cakar')),
-                        Text("🔑 ${game.kunci ? '✅' : '❌'}", style: const TextStyle(fontSize: 10, color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      SizedBox(
-                        width: 100, height: 100,
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: 0, top: 33,
-                              child: _dirButton(Icons.arrow_left, (isPressed) {
-                                game.player.move(isPressed ? -1 : 0);
-                              }),
-                            ),
-                            Positioned(
-                              right: 0, top: 33,
-                              child: _dirButton(Icons.arrow_right, (isPressed) {
-                                game.player.move(isPressed ? 1 : 0);
-                              }),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          _actionBtn("B", "FIRE", Colors.redAccent, game.shootPlayer),
-                          const SizedBox(width: 15),
-                          _actionBtn("A", "JUMP", const Color(0xFF900C3F), game.jumpPlayer),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _invButton(String icon, int count, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(color: const Color(0xFF444444), borderRadius: BorderRadius.circular(4)),
-        child: Text("$icon $count", style: const TextStyle(fontSize: 10, color: Colors.white)),
-      ),
-    );
-  }
-
-  Widget _dirButton(IconData icon, Function(bool) onPressed) {
-    return GestureDetector(
-      onTapDown: (_) => onPressed(true),
-      onTapUp: (_) => onPressed(false),
-      onTapCancel: () => onPressed(false),
-      child: Container(
-        width: 36, height: 36,
-        decoration: BoxDecoration(color: const Color(0xFF2C2C2C), borderRadius: BorderRadius.circular(4)),
-        child: Icon(icon, color: Colors.white),
-      ),
-    );
-  }
-
-  Widget _actionBtn(String label, String sub, Color color, VoidCallback onTap) {
-    return Column(
-      mainAxisSize: MainAxisSize.min, // FIX: MainAxisSize.min sudah benar
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: 46, height: 46,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-          ),
-        ),
-        Text(sub, style: const TextStyle(fontSize: 8, color: Colors.black54)),
-      ],
-    );
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
