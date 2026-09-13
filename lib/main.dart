@@ -807,7 +807,7 @@ class _GameScreenState extends State<GameScreen> {
                 ),
                 if (gameMode == "paused")
                   Container(
-                    color: Colors.black75,
+                    color: Colors.black.withOpacity(0.75),
                     alignment: Alignment.center,
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
